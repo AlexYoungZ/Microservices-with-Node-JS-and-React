@@ -1,0 +1,7 @@
+{
+  "cloudcode.yaml.format.enable": true,
+  "yaml.schemas": {},
+  "emmet.includeLanguages": { "javascript": "javascriptreact" },
+
+  "git.ignoreLimitWarning": true
+}
