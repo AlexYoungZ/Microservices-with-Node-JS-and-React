@@ -1,75 +1,51 @@
 import mongoose from 'mongoose';
 import { Message } from 'node-nats-streaming';
-import { OrderStatus, OrderCancelledEvent } from '@tickets/common';
-import { OrderCancelledListener } from '../order-cancelled-listener';
+import { OrderCreatedEvent, OrderStatus } from '@tickets/common';
 import { natsWrapper } from '../../../nats-wrapper';
+import { OrderCreatedListener } from '../order-created-listener';
 import { Order } from '../../../models/order';
 
-it('returns a 404 when purchasing an order that does not exist', async () => {
-  await request(app)
-    .post('/api/payments')
-    .set('Cookie', global.signin())
-    .send({
-      token: 'asldfk',
-      orderId: mongoose.Types.ObjectId().toHexString(),
-    })
-    .expect(404);
-});
+const setup = async () => {
+  // create an instance of the listener
+  const listener = new OrderCreatedListener(natsWrapper.client);
 
-it('returns a 401 when purchasing an order that doesnt belong to the user', async () => {
-  const order = Order.build({
+  const data: OrderCreatedEvent['data'] = {
     id: mongoose.Types.ObjectId().toHexString(),
-    userId: mongoose.Types.ObjectId().toHexString(),
     version: 0,
-    price: 20,
+    expiresAt: 'asdfg',
+    userId: 'asdfg',
     status: OrderStatus.Created,
-  });
-  await ticket.save();
-  const order = Order.build({
-    ticket,
-    userId: 'lakdjifdjalf',
-    status: OrderStatus.Created,
-    expireAt: new Date(),
-  });
-  await order.save();
+    ticket: {
+      id: 'asdfg',
+      price: 10,
+    },
+  };
 
-  await request(app)
-    .post('/api/orders')
-    .set('Cookie', global.signin())
-    .send({ ticketId: ticket.id })
-    .expect(400);
+  // create a fake message object
+  // @ts-ignore
+  const msg: Message = {
+    ack: jest.fn(),
+  };
+
+  return { listener, data, msg };
+};
+
+it('replicates the order info', async () => {
+  const { listener, data, msg } = await setup();
+
+  // call the onMessage function with the data object + message object
+  await listener.onMessage(data, msg);
+
+  const order = await Order.findById(data.id);
+
+  expect(order!.price).toEqual(data.ticket.price);
 });
 
-it('reserves a ticket', async () => {
-  // create a ticket with Ticket Model
-  const ticket = Ticket.build({
-    id: mongoose.Types.ObjectId().toHexString(),
-    title: 'concert',
-    price: 20,
-  });
-  await ticket.save();
+it('acks the message', async () => {
+  const { listener, data, msg } = await setup();
 
-  await request(app)
-    .post('/api/orders')
-    .set('Cookie', global.signin())
-    .send({ ticketId: ticket.id })
-    .expect(201);
-});
+  // call the onMessage function with the data object + message object
+  await listener.onMessage(data, msg);
 
-it('emits an order created event', async () => {
-  // create a ticket with Ticket Model
-  const ticket = Ticket.build({
-    id: mongoose.Types.ObjectId().toHexString(),
-    title: 'concert',
-    price: 20,
-  });
-  await ticket.save();
-
-  await request(app)
-    .post('/api/orders')
-    .set('Cookie', global.signin())
-    .send({ ticketId: ticket.id })
-    .expect(201);
-
-  expect(natsWrapper.client.publish).toHaveBeenCalled();
+  expect(msg.ack).toHaveBeenCalled();
 });

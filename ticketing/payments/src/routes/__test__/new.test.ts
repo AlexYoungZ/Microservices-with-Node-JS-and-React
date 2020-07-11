@@ -25,52 +25,71 @@ it('returns a 401 when purchasing an order that doesnt belong to the user', asyn
     price: 20,
     status: OrderStatus.Created,
   });
-  await ticket.save();
+  await order.save();
+
+  await request(app)
+    .post('/api/payments')
+    .set('Cookie', global.signin())
+    .send({
+      token: 'asdlfk',
+      orderId: order.id,
+    })
+    .expect(401);
+});
+
+it('returns a 400 when purchasing a cancelled order', async () => {
+  const userId = mongoose.Types.ObjectId().toHexString();
   const order = Order.build({
-    ticket,
-    userId: 'lakdjifdjalf',
-    status: OrderStatus.Created,
-    expireAt: new Date(),
+    id: mongoose.Types.ObjectId().toHexString(),
+    userId,
+    version: 0,
+    price: 20,
+    status: OrderStatus.Cancelled,
   });
   await order.save();
 
   await request(app)
-    .post('/api/orders')
-    .set('Cookie', global.signin())
-    .send({ ticketId: ticket.id })
+    .post('/api/payments')
+    .set('Cookie', global.signin(userId))
+    .send({
+      orderId: order.id,
+      token: 'asdlfk',
+    })
     .expect(400);
 });
 
-it('reserves a ticket', async () => {
-  // create a ticket with Ticket Model
-  const ticket = Ticket.build({
+it('returns a 201 with valid inputs', async () => {
+  const userId = mongoose.Types.ObjectId().toHexString();
+  const price = Math.floor(Math.random() * 100000);
+  const order = Order.build({
     id: mongoose.Types.ObjectId().toHexString(),
-    title: 'concert',
-    price: 20,
+    userId,
+    version: 0,
+    price,
+    status: OrderStatus.Created,
   });
-  await ticket.save();
+  await order.save();
 
   await request(app)
-    .post('/api/orders')
-    .set('Cookie', global.signin())
-    .send({ ticketId: ticket.id })
+    .post('/api/payments')
+    .set('Cookie', global.signin(userId))
+    .send({
+      token: 'tok_visa',
+      orderId: order.id,
+    })
     .expect(201);
-});
 
-it('emits an order created event', async () => {
-  // create a ticket with Ticket Model
-  const ticket = Ticket.build({
-    id: mongoose.Types.ObjectId().toHexString(),
-    title: 'concert',
-    price: 20,
+  const stripeCharges = await stripe.charges.list({ limit: 50 });
+  const stripeCharge = stripeCharges.data.find((charge) => {
+    return charge.amount === price * 100;
   });
-  await ticket.save();
 
-  await request(app)
-    .post('/api/orders')
-    .set('Cookie', global.signin())
-    .send({ ticketId: ticket.id })
-    .expect(201);
+  expect(stripeCharge).toBeDefined();
+  expect(stripeCharge!.currency).toEqual('usd');
 
-  expect(natsWrapper.client.publish).toHaveBeenCalled();
+  const payment = await Payment.findOne({
+    orderId: order.id,
+    stripeId: stripeCharge!.id,
+  });
+  expect(payment).not.toBeNull();
 });
